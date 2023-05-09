@@ -3,6 +3,7 @@ use std::time::Duration;
 use std::sync::Arc;
 
 use serenity::async_trait;
+use serenity::client::bridge::gateway::ShardManager;
 use serenity::model::prelude::{ChannelId, Ready};
 use serenity::prelude::*;
 use tokio::sync::mpsc::{Receiver, error::TryRecvError};
@@ -16,6 +17,12 @@ struct Handler {
 #[derive(Clone)]
 struct LoopHandler {
     channel_id: Arc<ChannelId>,
+}
+
+struct ShardManagerContainer;
+
+impl TypeMapKey for ShardManagerContainer {
+    type Value = Arc<Mutex<ShardManager>>;
 }
 
 #[async_trait]
@@ -36,6 +43,15 @@ impl EventHandler for Handler {
                             send_message(&ctx, *channel, &message).await;
                         },
                         Err(TryRecvError::Disconnected) => {
+                            let data = ctx.data.read().await;
+                            let shard_manager = match data.get::<ShardManagerContainer>() {
+                                Some(v) => v,
+                                None => {
+                                    panic!("couldnt get shard manager")
+                                },
+                            };
+                            let mut manager = shard_manager.lock().await;
+                            manager.shutdown_all().await;
                             panic!("channel closed");
                         },
                         _ => {}
@@ -62,6 +78,11 @@ pub async fn main(token: String, send_channel_id: u64, to_send_recv: Receiver<St
         })
         .await
         .expect("Error creating client");
+
+    {
+        let mut data = client.data.write().await;
+        data.insert::<ShardManagerContainer>(Arc::clone(&client.shard_manager));
+    }
 
     if let Err(why) = client.start().await {
         eprintln!("Client error: {:?}", why);
