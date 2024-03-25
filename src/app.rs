@@ -7,6 +7,7 @@ pub struct App {
     window_name: String,
     to_send: Sender<Packet>,
     paste_lines: Vec<String>,
+    total_paste_lines: Vec<String>,
 }
 
 impl App {
@@ -15,6 +16,7 @@ impl App {
             window_name: bot_name + " control",
             to_send,
             paste_lines: vec![],
+            total_paste_lines: vec![],
         };
     }
 
@@ -38,8 +40,9 @@ impl eframe::App for App {
                         Ok(string) => {
                             for line in string.split("\n") {
                                 let string = line.to_string();
-                                if line != "" && !self.paste_lines.contains(&string) {
-                                    self.paste_lines.push(string);
+                                if line != "" && !self.total_paste_lines.contains(&string) {
+                                    self.paste_lines.push(string.clone());
+                                    self.total_paste_lines.push(string);
                                 } 
                             }
                             self.try_send();
