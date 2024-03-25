@@ -1,42 +1,37 @@
 use tokio::sync::mpsc::Sender;
 use eframe::egui;
 use clipboard_win::{formats, get_clipboard, SysResult};
+use crate::bot::Packet;
 
 pub struct App {
     window_name: String,
-    to_send: Sender<String>,
+    to_send: Sender<Packet>,
     paste_lines: Vec<String>,
 }
 
 impl App {
-    /// Called once before the first frame.
-    pub fn new(cc: &eframe::CreationContext<'_>, bot_name: String, to_send: Sender<String>) -> Self {
-        // This is also where you can customize the look and feel of egui using
-        // `cc.egui_ctx.set_visuals` and `cc.egui_ctx.set_fonts`.
-
+    pub fn new(_cc: &eframe::CreationContext<'_>, bot_name: String, to_send: Sender<Packet>) -> Self {
         return Self {
             window_name: bot_name + " control",
             to_send,
             paste_lines: vec![],
         };
     }
+
+    pub fn try_send(&mut self) {
+        for chunk in self.paste_lines.chunks(5).filter(|x| x.len() == 5) {
+            let chuck_string = chunk.join("\n");
+            self.to_send.blocking_send(Packet::Send(chuck_string)).unwrap();
+        }
+        self.paste_lines = self.paste_lines.split_off(self.paste_lines.len() - self.paste_lines.len() % 5);
+    }
 }
 
 impl eframe::App for App {
-    /// Called each time the UI needs repainting, which may be many times per second.
-    /// Put your widgets into a `SidePanel`, `TopPanel`, `CentralPanel`, `Window` or `Area`.
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        // Examples of how to create different panels and windows.
-        // Pick whichever suits you.
-        // Tip: a good default choice is to just keep the `CentralPanel`.
-        // For inspiration and more examples, go to https://emilk.github.io/egui
-
         egui::CentralPanel::default().show(ctx, |ui| {
-            // The central panel the region left after adding TopPanel's and SidePanel's
-
             ui.with_layout(egui::Layout { main_dir: egui::Direction::TopDown, main_wrap: false, main_align: eframe::emath::Align::Min, main_justify: false, cross_align: eframe::emath::Align::Center, cross_justify: true }, |ui: &mut egui::Ui| {
                 ui.heading(&self.window_name);
-                ui.label(self.paste_lines.len().to_string() + " messages");
                 if ui.button("Paste").clicked() {
                     let result: SysResult<String> = get_clipboard(formats::Unicode);
                     match result {
@@ -47,23 +42,24 @@ impl eframe::App for App {
                                     self.paste_lines.push(string);
                                 } 
                             }
+                            self.try_send();
                         },
                         _ => {}
                     }
                 }
-                if ui.button("Send").clicked() {
-                    for chunk in self.paste_lines.chunks(5) {
-                        let chuck_string = chunk.join("\n");
-                        self.to_send.blocking_send(chuck_string).unwrap();
-                    }
-                    self.paste_lines.clear();
-                }
             });
         });
     }
+
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        if self.paste_lines.len() != 0 {
+            let chuck_string = self.paste_lines.join("\n");
+            self.to_send.blocking_send(Packet::SendAndQuit(chuck_string)).unwrap();
+        }
+    }
 }
 
-pub fn main(bot_name: String, to_send: Sender<String>) -> eframe::Result<()> {
+pub fn main(bot_name: String, to_send: Sender<Packet>) -> eframe::Result<()> {
     let native_options = eframe::NativeOptions {
         always_on_top: true,
         maximized: false,
@@ -72,7 +68,7 @@ pub fn main(bot_name: String, to_send: Sender<String>) -> eframe::Result<()> {
         drag_and_drop_support: false,
         icon_data: None,
         initial_window_pos: None,
-        initial_window_size: Some(egui::vec2(300.0,100.0)),
+        initial_window_size: Some(egui::vec2(300.0,58.0)),
         min_window_size: None,
         max_window_size: None,
         resizable: false,

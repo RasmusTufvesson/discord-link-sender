@@ -8,10 +8,16 @@ use serenity::model::prelude::{ChannelId, Ready};
 use serenity::prelude::*;
 use tokio::sync::mpsc::{Receiver, error::TryRecvError};
 
+#[derive(Debug)]
+pub enum Packet {
+    Send(String),
+    SendAndQuit(String),
+}
+
 struct Handler {
     loop_running: AtomicBool,
     loop_handler: LoopHandler,
-    to_send_recv: Arc<Mutex<Receiver<String>>>,
+    to_send_recv: Arc<Mutex<Receiver<Packet>>>,
 }
 
 #[derive(Clone)]
@@ -39,8 +45,21 @@ impl EventHandler for Handler {
                 loop {
                     let result = to_send_recv.lock().await.try_recv();
                     match result {
-                        Ok(message) => {
-                            send_message(&ctx, *channel, &message).await;
+                        Ok(packet) => {
+                            let (Packet::Send(message) | Packet::SendAndQuit(message)) = &packet;
+                            send_message(&ctx, *channel, message).await;
+                            if let Packet::SendAndQuit(_) = packet {
+                                let data = ctx.data.read().await;
+                                let shard_manager = match data.get::<ShardManagerContainer>() {
+                                    Some(v) => v,
+                                    None => {
+                                        panic!("couldnt get shard manager")
+                                    },
+                                };
+                                let mut manager = shard_manager.lock().await;
+                                manager.shutdown_all().await;
+                                break;
+                            }
                         },
                         Err(TryRecvError::Disconnected) => {
                             let data = ctx.data.read().await;
@@ -52,7 +71,7 @@ impl EventHandler for Handler {
                             };
                             let mut manager = shard_manager.lock().await;
                             manager.shutdown_all().await;
-                            panic!("channel closed");
+                            break;
                         },
                         _ => {}
                     }
@@ -65,7 +84,7 @@ impl EventHandler for Handler {
     }
 }
 
-pub async fn main(token: String, send_channel_id: u64, to_send_recv: Receiver<String>) {
+pub async fn main(token: String, send_channel_id: u64, to_send_recv: Receiver<Packet>) {
     let channel_id = Arc::new(ChannelId::from(send_channel_id));
     let to_send_recv = Arc::new(Mutex::new(to_send_recv));
     let intents = GatewayIntents::GUILD_MESSAGES
