@@ -1,5 +1,5 @@
 use tokio::sync::mpsc::Sender;
-use eframe::egui::{self, vec2, Grid, ViewportBuilder};
+use eframe::egui::{self, Grid, ViewportBuilder};
 use clipboard_win::{formats, get_clipboard, SysResult};
 use crate::bot::Packet;
 

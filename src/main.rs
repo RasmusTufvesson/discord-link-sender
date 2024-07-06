@@ -11,7 +11,6 @@ mod bot;
 #[derive(Deserialize)]
 struct Config {
     token: String,
-    invite_link: String,
     bot_name: String,
     channels: Vec<(String, u64)>,
 }
