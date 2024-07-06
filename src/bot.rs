@@ -10,8 +10,8 @@ use tokio::sync::mpsc::{Receiver, error::TryRecvError};
 
 #[derive(Debug)]
 pub enum Packet {
-    Send(String),
-    SendAndQuit(String),
+    Send(String, usize),
+    SendAndQuit(Vec<String>),
 }
 
 struct Handler {
@@ -22,7 +22,7 @@ struct Handler {
 
 #[derive(Clone)]
 struct LoopHandler {
-    channel_id: Arc<ChannelId>,
+    channel_ids: Arc<Vec<u64>>,
 }
 
 struct ShardManagerContainer;
@@ -39,26 +39,34 @@ impl EventHandler for Handler {
         
         if !self.loop_running.load(Ordering::Relaxed) {
             let handler = self.loop_handler.clone();
-            let channel = Arc::clone(&handler.channel_id);
+            let channels = Arc::clone(&handler.channel_ids);
             let to_send_recv = Arc::clone(&self.to_send_recv);
             tokio::spawn(async move {
                 loop {
                     let result = to_send_recv.lock().await.try_recv();
                     match result {
                         Ok(packet) => {
-                            let (Packet::Send(message) | Packet::SendAndQuit(message)) = &packet;
-                            send_message(&ctx, *channel, message).await;
-                            if let Packet::SendAndQuit(_) = packet {
-                                let data = ctx.data.read().await;
-                                let shard_manager = match data.get::<ShardManagerContainer>() {
-                                    Some(v) => v,
-                                    None => {
-                                        panic!("couldnt get shard manager")
-                                    },
-                                };
-                                let mut manager = shard_manager.lock().await;
-                                manager.shutdown_all().await;
-                                break;
+                            match packet {
+                                Packet::Send(message, channel) => {
+                                    send_message(&ctx, channels[channel].into(), &message).await;
+                                }
+                                Packet::SendAndQuit(messages) => {
+                                    for (channel, message) in messages.iter().enumerate() {
+                                        if message.len() != 0 {
+                                            send_message(&ctx, channels[channel].into(), message).await;
+                                        }
+                                    }
+                                    let data = ctx.data.read().await;
+                                    let shard_manager = match data.get::<ShardManagerContainer>() {
+                                        Some(v) => v,
+                                        None => {
+                                            panic!("couldnt get shard manager")
+                                        },
+                                    };
+                                    let mut manager = shard_manager.lock().await;
+                                    manager.shutdown_all().await;
+                                    break;
+                                }
                             }
                         },
                         Err(TryRecvError::Disconnected) => {
@@ -84,15 +92,15 @@ impl EventHandler for Handler {
     }
 }
 
-pub async fn main(token: String, send_channel_id: u64, to_send_recv: Receiver<Packet>) {
-    let channel_id = Arc::new(ChannelId::from(send_channel_id));
+pub async fn main(token: String, send_channel_ids: Vec<u64>, to_send_recv: Receiver<Packet>) {
+    let channel_ids = Arc::new(send_channel_ids);
     let to_send_recv = Arc::new(Mutex::new(to_send_recv));
     let intents = GatewayIntents::GUILD_MESSAGES
         | GatewayIntents::DIRECT_MESSAGES;
     let mut client = Client::builder(&token, intents)
         .event_handler(Handler {
             loop_running: AtomicBool::new(false),
-            loop_handler: LoopHandler { channel_id: channel_id },
+            loop_handler: LoopHandler { channel_ids: channel_ids },
             to_send_recv,
         })
         .await
