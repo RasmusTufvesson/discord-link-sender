@@ -12,7 +12,7 @@ mod bot;
 struct Config {
     token: String,
     bot_name: String,
-    channels: Vec<(String, u64)>,
+    channels: Vec<(String, u64, u64)>,
 }
 
 fn main() {
@@ -20,10 +20,10 @@ fn main() {
         .expect("Should have been able to read the file");
     let config: Config = toml::from_str(&config).unwrap();
     let (tx, rx) = tokio::sync::mpsc::channel(100);
-    let channel_names = config.channels.iter().map(|(name, _)| name.clone()).collect();
+    let channel_names = config.channels.iter().map(|(name, _, _)| name.clone()).collect();
     let bot_thread = thread::spawn(move || {
         let threaded_rt = runtime::Runtime::new().unwrap();
-        threaded_rt.block_on(bot::main(config.token, config.channels.iter().map(|(_, id)| *id).collect(), rx));
+        threaded_rt.block_on(bot::main(config.token, config.channels.iter().map(|(_, id, id_or_zero)| (*id, if *id_or_zero == 0 { None } else { Some(*id_or_zero) })).collect(), rx));
     });
     match app::main(config.bot_name, tx, channel_names) {
         Ok(_) => {}

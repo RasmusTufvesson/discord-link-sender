@@ -22,7 +22,7 @@ struct Handler {
 
 #[derive(Clone)]
 struct LoopHandler {
-    channel_ids: Arc<Vec<u64>>,
+    channel_ids: Arc<Vec<(u64, Option<u64>)>>,
 }
 
 struct ShardManagerContainer;
@@ -41,6 +41,25 @@ impl EventHandler for Handler {
             let handler = self.loop_handler.clone();
             let channels = Arc::clone(&handler.channel_ids);
             let to_send_recv = Arc::clone(&self.to_send_recv);
+            for (send_channel, recv_channel) in channels.iter() {
+                if let Some(recv_channel) = recv_channel {
+                    let recv_channel = ChannelId(*recv_channel);
+                    let send_channel = ChannelId(*send_channel);
+                    let mut messages = vec![];
+                    for msg in recv_channel.messages(&ctx.http, |retriever| retriever).await.unwrap() {
+                        for line in msg.content.split("\n") {
+                            if line != "" {
+                                messages.push(line.to_string());
+                            }
+                        }
+                        msg.delete(&ctx.http).await.unwrap();
+                    }
+                    for chunk in messages.chunks(5) {
+                        let chunk_string = chunk.join("\n");
+                        send_message(&ctx, send_channel.clone(), &chunk_string).await;
+                    }
+                }
+            }
             tokio::spawn(async move {
                 loop {
                     let result = to_send_recv.lock().await.try_recv();
@@ -48,12 +67,12 @@ impl EventHandler for Handler {
                         Ok(packet) => {
                             match packet {
                                 Packet::Send(message, channel) => {
-                                    send_message(&ctx, channels[channel].into(), &message).await;
+                                    send_message(&ctx, channels[channel].0.into(), &message).await;
                                 }
                                 Packet::SendAndQuit(messages) => {
                                     for (channel, message) in messages.iter().enumerate() {
                                         if message.len() != 0 {
-                                            send_message(&ctx, channels[channel].into(), message).await;
+                                            send_message(&ctx, channels[channel].0.into(), message).await;
                                         }
                                     }
                                     let data = ctx.data.read().await;
@@ -92,7 +111,7 @@ impl EventHandler for Handler {
     }
 }
 
-pub async fn main(token: String, send_channel_ids: Vec<u64>, to_send_recv: Receiver<Packet>) {
+pub async fn main(token: String, send_channel_ids: Vec<(u64, Option<u64>)>, to_send_recv: Receiver<Packet>) {
     let channel_ids = Arc::new(send_channel_ids);
     let to_send_recv = Arc::new(Mutex::new(to_send_recv));
     let intents = GatewayIntents::GUILD_MESSAGES
