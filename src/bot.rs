@@ -1,9 +1,8 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use std::sync::Arc;
-
+use serenity::all::{GetMessages, ShardManager};
 use serenity::async_trait;
-use serenity::client::bridge::gateway::ShardManager;
 use serenity::model::prelude::{ChannelId, Ready};
 use serenity::prelude::*;
 use tokio::sync::mpsc::{Receiver, error::TryRecvError};
@@ -28,7 +27,7 @@ struct LoopHandler {
 struct ShardManagerContainer;
 
 impl TypeMapKey for ShardManagerContainer {
-    type Value = Arc<Mutex<ShardManager>>;
+    type Value = Arc<ShardManager>;
 }
 
 #[async_trait]
@@ -43,10 +42,10 @@ impl EventHandler for Handler {
             let to_send_recv = Arc::clone(&self.to_send_recv);
             for (send_channel, recv_channel) in channels.iter() {
                 if let Some(recv_channel) = recv_channel {
-                    let recv_channel = ChannelId(*recv_channel);
-                    let send_channel = ChannelId(*send_channel);
+                    let recv_channel = ChannelId::new(*recv_channel);
+                    let send_channel = ChannelId::new(*send_channel);
                     let mut messages = vec![];
-                    for msg in recv_channel.messages(&ctx.http, |retriever| retriever).await.unwrap() {
+                    for msg in recv_channel.messages(&ctx.http, GetMessages::new()).await.unwrap() {
                         for line in msg.content.split("\n") {
                             if line != "" {
                                 messages.push(line.to_string());
@@ -82,8 +81,7 @@ impl EventHandler for Handler {
                                             panic!("couldnt get shard manager")
                                         },
                                     };
-                                    let mut manager = shard_manager.lock().await;
-                                    manager.shutdown_all().await;
+                                    shard_manager.shutdown_all().await;
                                     break;
                                 }
                             }
@@ -96,8 +94,7 @@ impl EventHandler for Handler {
                                     panic!("couldnt get shard manager")
                                 },
                             };
-                            let mut manager = shard_manager.lock().await;
-                            manager.shutdown_all().await;
+                            shard_manager.shutdown_all().await;
                             break;
                         },
                         _ => {}

@@ -40,7 +40,7 @@ impl eframe::App for App {
             ui.with_layout(egui::Layout { main_dir: egui::Direction::TopDown, main_wrap: false, main_align: eframe::emath::Align::Min, main_justify: false, cross_align: eframe::emath::Align::Center, cross_justify: true }, |ui: &mut egui::Ui| {
                 ui.heading(&self.window_name);
                 let mut try_to_send = false;
-                let width = ui.available_width() / self.channels.len() as f32;
+                let width = (ui.available_width() - ui.spacing().item_spacing.x * (self.channels.len() - 1) as f32) / self.channels.len() as f32;
                 Grid::new("channels")
                     .num_columns(self.channels.len())
                     .min_col_width(width)
